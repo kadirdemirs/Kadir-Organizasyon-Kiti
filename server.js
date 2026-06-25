@@ -21,19 +21,26 @@ function loadConfig() {
   cfg.provider = process.env.AI_PROVIDER || cfg.provider || "gemini";
   cfg.geminiKey = process.env.GEMINI_API_KEY || cfg.geminiKey || "";
   cfg.openaiKey = process.env.OPENAI_API_KEY || cfg.openaiKey || "";
+  cfg.qwenKey = process.env.QWEN_API_KEY || process.env.OPENROUTER_API_KEY || cfg.qwenKey || "";
   cfg.youtubeKey = process.env.YOUTUBE_API_KEY || cfg.youtubeKey || "";
   cfg.assistantModel = cfg.assistantModel || "gemini-2.5-flash";
+  cfg.qwenModel = cfg.qwenModel || "qwen/qwen3-next-80b-a3b-instruct:free";
   cfg.imageModel = cfg.imageModel || "gemini-2.5-flash-image";
   return cfg;
 }
 let config = loadConfig();
 
 function features() {
-  const hasAi = Boolean(config.geminiKey || config.openaiKey);
+  // assistant: secili saglayicinin anahtari var mi?
+  const assistant = config.provider === "openai" ? Boolean(config.openaiKey)
+    : config.provider === "qwen" ? Boolean(config.qwenKey)
+    : Boolean(config.geminiKey);
+  // gorsel: Qwen'in bedava gorsel ucu yok; gemini veya openai anahtari varsa acik
+  const image = Boolean(config.geminiKey || config.openaiKey);
   return {
     provider: config.provider,
-    assistant: hasAi,
-    image: hasAi,
+    assistant,
+    image,
     youtube: Boolean(config.youtubeKey),
   };
 }
@@ -111,6 +118,34 @@ async function handleAssistant(body) {
   const sys = "Sen bir YouTube produksiyon ekibinin Turkce konusan yapim asistanisin. " +
     "Asagidaki ekip verisine dayanarak kisa, net ve uygulanabilir cevap ver. " +
     "Veri yoksa genel oneride bulun.\n\n--- EKIP VERISI ---\n" + context;
+
+  if (config.provider === "qwen") {
+    if (!config.qwenKey) return { error: "Qwen (OpenRouter) anahtari yok." };
+    let j;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${config.qwenKey}`,
+          "HTTP-Referer": "http://127.0.0.1",
+          "X-Title": "Kade Organizasyon Kiti",
+        },
+        body: JSON.stringify({
+          model: config.qwenModel,
+          messages: [{ role: "system", content: sys }, { role: "user", content: question }],
+          temperature: 0.4,
+        }),
+      });
+      j = await r.json();
+      if (r.ok && j.choices?.[0]?.message?.content) return { answer: j.choices[0].message.content.trim() };
+      const msg = j.error?.message || "";
+      const transient = r.status === 429 || r.status === 503 || /rate.?limit|overloaded|temporarily/i.test(msg);
+      if (!transient && msg) return { error: msg };
+      await new Promise((s) => setTimeout(s, 1500 * (attempt + 1)));
+    }
+    return { error: (j?.error?.message || "Qwen su an yogun") + " — tekrar dene veya bedava kota dolmus olabilir." };
+  }
 
   if (config.provider === "openai") {
     if (!config.openaiKey) return { error: "OpenAI anahtari yok." };

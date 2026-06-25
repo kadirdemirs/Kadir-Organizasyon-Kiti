@@ -1,20 +1,25 @@
 {
   "_aciklama": "Bu dosyayi 'kade.config.json' adiyla kopyala ve anahtarlarini yapistir. kade.config.json gitignore'ludur, kimseyle paylasilmaz.",
 
+  "_provider_secenekleri": "gemini (bedava) | qwen (bedava, OpenRouter) | openai (ucretli)",
   "provider": "gemini",
 
   "geminiKey": "",
   "youtubeKey": "",
 
+  "qwenKey": "",
+
   "openaiKey": "",
 
   "assistantModel": "gemini-2.5-flash",
+  "qwenModel": "qwen/qwen3-next-80b-a3b-instruct:free",
   "imageModel": "gemini-2.5-flash-image",
 
   "_nereden_alinir": {
     "geminiKey": "https://aistudio.google.com/apikey  (tek tik, bedava katman var)",
     "youtubeKey": "https://console.cloud.google.com -> YouTube Data API v3 -> Credentials -> API Key (ucretsiz kota)",
+    "qwenKey": "https://openrouter.ai/keys  (uye ol -> Create Key. Qwen ':free' modelleri bedava). provider'i 'qwen' yap.",
     "openaiKey": "https://platform.openai.com/api-keys  (kredi karti gerekir; sadece provider='openai' ise)",
-    "not": "provider 'gemini' ise geminiKey + youtubeKey yeterli. provider 'openai' ise asistan/gorsel icin openaiKey, yorumlar icin yine youtubeKey gerekir."
+    "not": "Asistan saglayicisi 'provider' ile secilir. Yorumlar her zaman youtubeKey ile calisir. Gorsel icin gemini (faturalandirma) veya openai gerekir; Qwen'in bedava gorsel ucu yoktur. Bedava Qwen modelleri zamanla degisir: https://openrouter.ai/models?max_price=0 (Qwen filtrele)."
   }
 }
