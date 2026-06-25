@@ -41,8 +41,25 @@
       <button class="nav-item" data-view="vibe"><i data-lucide="code-2"></i><span>Vibe Coding</span></button>
       <button class="nav-item" data-view="radar"><i data-lucide="radio-tower"></i><span>AI Radar</span></button>
 
+      <p class="nav-label">Notlar</p>
+      <button class="nav-item" data-view="pages"><i data-lucide="notebook-text"></i><span>Sayfalar</span></button>
+
       <p class="nav-label">Sistem</p>
       <button class="nav-item" data-view="settings"><i data-lucide="settings"></i><span>Ayarlar</span></button>
+    </div>
+
+    <!-- Page Tree (Notion tarzı daima görünür) -->
+    <div class="ptree-nav" id="pagesNavTree">
+      <div class="ptree-nav-head">
+        <span class="ptree-nav-label">Favoriler</span>
+      </div>
+      <div id="pageTreeFavs"><div class="ptree-empty">Favori yok</div></div>
+      <div class="ptree-nav-head" style="margin-top:6px">
+        <span class="ptree-nav-label">Sayfalar</span>
+        <button id="newRootPage" class="icon-btn ptree-new-btn" title="Yeni sayfa"><i data-lucide="plus" style="width:12px;height:12px"></i></button>
+      </div>
+      <div id="pageTreeRoot"></div>
+      <button id="openTrashBtn" class="ptree-trash-btn"><i data-lucide="trash-2" style="width:12px;height:12px"></i>Çöp kutusu</button>
     </div>
 
     <div class="sidebar-footer">
@@ -109,6 +126,30 @@
 
     <!-- ══════════════ SENTSCAN ══════════════ -->
     <section class="view" id="comments" data-title="SentScan" data-eyebrow="Yapay Zeka Yorum Analizi">
+      <article class="panel source-panel">
+        <div class="panel-head"><div><p class="eyebrow">Kaynak</p><h2>Video & Transkript</h2></div><div class="icon-area"><i data-lucide="file-video-2"></i></div></div>
+        <div class="source-grid">
+          <div class="source-video-box">
+            <label><span class="label-text">Video dosyası</span><input id="sourceVideoFile" type="file" accept="video/*"/></label>
+            <div class="source-video-preview">
+              <div id="sourceVideoEmpty" class="source-video-empty"><i data-lucide="film"></i></div>
+              <video id="sourceVideoPreview" controls playsinline style="display:none"></video>
+            </div>
+            <div id="sourceVideoMeta" class="source-meta"></div>
+          </div>
+          <div class="source-transcript-box">
+            <label><span class="label-text">Transkript dosyası</span><input id="transcriptFile" type="file" accept=".txt,.srt,.vtt,.json,text/plain"/></label>
+            <label><span class="label-text">Transkript</span><textarea id="transcriptInput" rows="8" placeholder="Transkripti buraya yapıştır veya .txt/.srt yükle"></textarea></label>
+            <div id="transcriptMeta" class="source-meta"></div>
+            <div class="form-actions">
+              <button type="button" class="ghost-btn" id="clearTranscriptBtn"><i data-lucide="eraser"></i>Temizle</button>
+              <button type="button" class="ghost-btn" id="sendTranscriptPage"><i data-lucide="notebook-tabs"></i>Notlara Aktar</button>
+              <button type="button" class="primary-btn" id="analyzeTranscriptBtn"><i data-lucide="scan-text"></i>Transkripti Analiz Et</button>
+            </div>
+          </div>
+        </div>
+        <div id="transcriptInsights" class="transcript-insights"></div>
+      </article>
       <div class="layout-two wide-left">
         <article class="panel">
           <div class="panel-head"><div><p class="eyebrow">YouTube</p><h2>Yorum seti</h2></div><div class="icon-area"><i data-lucide="youtube"></i></div></div>
@@ -182,7 +223,7 @@
             <div class="panel-head"><div><p class="eyebrow">Yeni fikir</p><h2>Kart aç</h2></div><div class="icon-area"><i data-lucide="plus-circle"></i></div></div>
             <form id="ideaForm" class="form-grid">
               <label><span class="label-text">Başlık</span><input id="ideaTitle" required placeholder="Fikrin adı"/></label>
-              <label><span class="label-text">Kanal</span><input id="ideaChannel" value="Orkun Işıtmak"/></label>
+              <label><span class="label-text">Kanal</span><select id="ideaChannel"><option value="Kade Media">Kade Media</option><option value="Kade V2">Kade V2</option></select></label>
               <label><span class="label-text">Not</span><textarea id="ideaNotes" rows="4" placeholder="Açıklama…"></textarea></label>
               <button class="primary-btn" type="submit"><i data-lucide="save"></i>Kaydet</button>
             </form>
@@ -260,6 +301,11 @@
               </div>
               <label><span class="label-text">Prompt</span><textarea id="imagePrompt" rows="5" placeholder="@ana-kisi ve @ikinci-kisi 1 yıldızlı restoranda kapak pozu veriyor…"></textarea></label>
               <div class="form-actions">
+                <select id="brainstormCount" class="count-select" aria-label="Brainstorm adet">
+                  <option value="5">5 fikir</option>
+                  <option value="10">10 fikir</option>
+                  <option value="20">20 fikir</option>
+                </select>
                 <button type="button" class="ghost-btn" id="brainstormImage"><i data-lucide="brain"></i>Brainstorm</button>
                 <button type="button" class="ghost-btn" id="enhanceImagePrompt"><i data-lucide="wand-2"></i>İyileştir</button>
                 <button type="button" class="ghost-btn" id="saveTemplate"><i data-lucide="bookmark"></i>Şablon Kaydet</button>
@@ -305,7 +351,14 @@
               </div>
             </form>
           </article>
-          <article class="panel"><div class="panel-head"><div><p class="eyebrow">Referanslar</p><h2>YouTube konseptleri</h2></div><div class="icon-area"><i data-lucide="clapperboard"></i></div></div><div id="youtubeReferences"></div></article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">Referanslar</p><h2>YouTube konseptleri</h2></div><div class="icon-area"><i data-lucide="clapperboard"></i></div></div>
+            <div class="yt-ref-filter">
+              <button class="filter-chip active" data-yt-sort="popular" onclick="switchYtSort('popular',this)">En çok izlenen</button>
+              <button class="filter-chip" data-yt-sort="recent" onclick="switchYtSort('recent',this)">Son videolar</button>
+            </div>
+            <div id="youtubeReferences"></div>
+          </article>
         </div>
         <article class="panel"><div class="panel-head"><div><p class="eyebrow">Geçmiş</p><h2>Üretim kayıtları</h2></div><div class="icon-area"><i data-lucide="history"></i></div></div><div id="videoHistory" class="video-grid"></div></article>
       </div>
@@ -363,7 +416,7 @@
           <form id="settingsForm" class="form-grid">
             <label><span class="label-text">Ekip adı</span><input id="setTeamName" placeholder="Ork Digital"/></label>
             <label><span class="label-text">Aylık bütçe (₺)</span><input id="setBudget" type="number" min="0" placeholder="650000"/></label>
-            <label><span class="label-text">Ekip üyeleri (virgülle ayır)</span><input id="setMembers" placeholder="Orkun, Emir, Emre, Çağrı, Berkin, Merve"/></label>
+            <label><span class="label-text">Ekip üyeleri (virgülle ayır)</span><input id="setMembers" placeholder="Kadir, Emir, Emre, Çağrı, Berkin, Merve"/></label>
             <button class="primary-btn" type="submit"><i data-lucide="save"></i>Kaydet</button>
           </form>
         </article>
@@ -385,6 +438,59 @@
           <div class="panel-head"><div><p class="eyebrow">Aktivite logu</p><h2>Tüm aksiyonlar</h2></div><div class="icon-area"><i data-lucide="scroll-text"></i></div></div>
           <div id="fullActivityLog"></div>
         </article>
+      </div>
+    </section>
+
+    <!-- ══════════════ PAGES ══════════════ -->
+    <section class="view" id="pages" data-title="Sayfalar" data-eyebrow="Notion Tarzı Notlar">
+
+      <!-- Empty state -->
+      <div id="pageEmpty" class="page-empty-state">
+        <div class="page-empty-icon">📝</div>
+        <h2>Sayfana başla</h2>
+        <p>Bir sayfa oluştur, notlarını yaz, listeler yap.</p>
+        <button id="newPageFromEmpty" class="primary-btn"><i data-lucide="plus"></i>Yeni sayfa</button>
+      </div>
+
+      <!-- Page editor -->
+      <div id="pageEditor" class="page-editor-shell" style="display:none">
+        <!-- Cover image area -->
+        <div id="pageCoverArea" class="page-cover-area"></div>
+
+        <!-- Breadcrumb + actions -->
+        <div class="page-topbar">
+          <div id="pageBreadcrumb" class="page-breadcrumb"></div>
+          <div class="page-actions">
+            <button id="pageFavBtn" class="ghost-btn" style="font-size:12px"><i data-lucide="star" style="width:13px;height:13px"></i>Favori ekle</button>
+            <button id="pageAddCoverBtn" class="ghost-btn" style="font-size:12px"><i data-lucide="image" style="width:13px;height:13px"></i>Kapak ekle</button>
+            <button id="pageAddSubBtn" class="ghost-btn" style="font-size:12px"><i data-lucide="file-plus-2" style="width:13px;height:13px"></i>Alt sayfa</button>
+            <button id="pageDupBtn" class="ghost-btn" style="font-size:12px"><i data-lucide="copy" style="width:13px;height:13px"></i>Çoğalt</button>
+            <button id="pageMoveBtn" class="ghost-btn" style="font-size:12px"><i data-lucide="move" style="width:13px;height:13px"></i>Taşı</button>
+            <button class="ghost-btn" style="font-size:12px" onclick="togglePageSearch()" title="Ctrl+F"><i data-lucide="search" style="width:13px;height:13px"></i>Ara</button>
+            <button id="pageExportMdBtn" class="ghost-btn" style="font-size:12px"><i data-lucide="download" style="width:13px;height:13px"></i>Markdown</button>
+            <button id="pageDeleteBtn" class="ghost-btn" style="font-size:12px;color:var(--danger)"><i data-lucide="trash-2" style="width:13px;height:13px"></i>Sil</button>
+          </div>
+        </div>
+
+        <!-- Page content area -->
+        <div class="page-content">
+          <!-- Page icon + title -->
+          <div class="page-title-row">
+            <button id="pageIconBtn" class="page-icon-btn" title="Emoji değiştir">📄</button>
+            <div id="pageTitleEl" class="page-title-el" contenteditable="true" data-ph="Başlıksız"></div>
+          </div>
+
+          <!-- Blocks -->
+          <div id="blocksInner" class="blocks-inner"></div>
+
+          <!-- Word count -->
+          <div id="pageWordCount" class="page-word-count"></div>
+
+          <!-- Add block hint -->
+          <button id="addBlockHintBtn" class="add-block-hint-btn">
+            <i data-lucide="plus" style="width:14px;height:14px"></i>Blok ekle ya da / yazarak komut gir
+          </button>
+        </div>
       </div>
     </section>
 
@@ -428,6 +534,74 @@
 
 <!-- ── Toast container ── -->
 <div id="toastContainer"></div>
+
+<!-- ══ SLASH MENU ══ -->
+<div id="slashMenu" class="slash-menu" style="display:none">
+  <div class="slash-search-wrap">
+    <i data-lucide="search" style="width:13px;height:13px;opacity:.5"></i>
+    <input id="slashInput" type="text" class="slash-search" placeholder="Blok ara…" autocomplete="off"/>
+  </div>
+  <div id="slashList" class="slash-list"></div>
+  <div class="slash-footer"><kbd class="kbd">↑↓</kbd>Gezin &nbsp;<kbd class="kbd">↵</kbd>Seç &nbsp;<kbd class="kbd">ESC</kbd>Kapat</div>
+</div>
+
+<!-- ══ INLINE TOOLBAR ══ -->
+<div id="inlineToolbar" class="inline-toolbar" style="display:none">
+  <button class="itb-btn" data-cmd="bold" title="Kalın (Ctrl+B)"><b>B</b></button>
+  <button class="itb-btn" data-cmd="italic" title="İtalik (Ctrl+I)"><i>I</i></button>
+  <button class="itb-btn" data-cmd="underline" title="Altı çizili"><u>U</u></button>
+  <button class="itb-btn" data-cmd="strikeThrough" title="Üstü çizili"><s>S</s></button>
+  <button class="itb-btn" data-cmd="inlineCode" title="Kod">&#60;/&#62;</button>
+  <div class="itb-sep"></div>
+  <button class="itb-btn" data-cmd="createLink" title="Link"><i data-lucide="link" style="width:13px;height:13px"></i></button>
+  <div class="itb-sep"></div>
+  <div class="itb-color-wrap" title="Metin rengi">
+    <span class="itb-color-label">A</span>
+    <div class="itb-color-swatches" id="itbTextColors">
+      <button class="color-swatch" data-cmd="foreColor" data-val="#f0f4ff" style="background:#f0f4ff" title="Varsayılan"></button>
+      <button class="color-swatch" data-cmd="foreColor" data-val="#00d4aa" style="background:#00d4aa" title="Turkuaz"></button>
+      <button class="color-swatch" data-cmd="foreColor" data-val="#6c8ef5" style="background:#6c8ef5" title="İndigo"></button>
+      <button class="color-swatch" data-cmd="foreColor" data-val="#ff6b6b" style="background:#ff6b6b" title="Kırmızı"></button>
+      <button class="color-swatch" data-cmd="foreColor" data-val="#ffd166" style="background:#ffd166" title="Sarı"></button>
+      <button class="color-swatch" data-cmd="foreColor" data-val="#c77dff" style="background:#c77dff" title="Mor"></button>
+    </div>
+  </div>
+  <div class="itb-color-wrap" title="Arka plan rengi">
+    <span class="itb-color-label" style="background:rgba(255,255,255,0.12)">A</span>
+    <div class="itb-color-swatches" id="itbBgColors">
+      <button class="color-swatch" data-cmd="hiliteColor" data-val="transparent" style="background:transparent;border:1px solid rgba(255,255,255,0.3)" title="Yok"></button>
+      <button class="color-swatch" data-cmd="hiliteColor" data-val="rgba(0,212,170,0.2)" style="background:rgba(0,212,170,0.2)" title="Yeşil arka plan"></button>
+      <button class="color-swatch" data-cmd="hiliteColor" data-val="rgba(108,142,245,0.2)" style="background:rgba(108,142,245,0.2)" title="Mavi arka plan"></button>
+      <button class="color-swatch" data-cmd="hiliteColor" data-val="rgba(255,107,107,0.2)" style="background:rgba(255,107,107,0.2)" title="Kırmızı arka plan"></button>
+      <button class="color-swatch" data-cmd="hiliteColor" data-val="rgba(255,209,102,0.2)" style="background:rgba(255,209,102,0.2)" title="Sarı arka plan"></button>
+      <button class="color-swatch" data-cmd="hiliteColor" data-val="rgba(199,125,255,0.2)" style="background:rgba(199,125,255,0.2)" title="Mor arka plan"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ EMOJI PICKER ══ -->
+<div id="emojiPicker" class="emoji-picker" style="display:none">
+  <div class="emoji-picker-head">Emoji seç</div>
+  <div id="emojiGrid" class="emoji-grid"></div>
+</div>
+
+<!-- ══ TRASH MODAL ══ -->
+<dialog id="trashModal" class="detail-dialog" aria-modal="true" aria-labelledby="trashTitle">
+  <form method="dialog" class="dialog-shell">
+    <div class="dialog-head">
+      <div class="dialog-head-left">
+        <p class="eyebrow">Geri dönüşüm kutusu</p>
+        <h2 id="trashTitle">Silinmiş sayfalar</h2>
+      </div>
+      <div class="dialog-head-actions">
+        <button class="icon-btn" value="close" aria-label="Kapat"><i data-lucide="x"></i></button>
+      </div>
+    </div>
+    <div class="dialog-body">
+      <div id="trashList"></div>
+    </div>
+  </form>
+</dialog>
 
 </body>
 </html>

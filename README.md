@@ -4,7 +4,9 @@ Bu klasor, paylastigin videodaki araclarin tek bir yerel web uygulamasi olarak o
 
 ## Acma
 
-`BASLAT.bat` dosyasina cift tiklayabilir veya `index.html` dosyasini tarayicida acabilirsin.
+`BASLAT.bat` dosyasina cift tikla. Bu dosya uygulamayi `http://127.0.0.1:4173` uzerinden acar; boylece dosya yukleme, yerel kayit ve indirme akislari tarayicida daha guvenilir calisir.
+
+Node.js bulunamazsa `BASLAT.bat` otomatik olarak `index.html` dosyasini dogrudan acar.
 
 Ana dosya:
 
@@ -14,6 +16,7 @@ Destek dosyalari:
 
 - `styles.css`
 - `app.js`
+- `server.js`
 - `VIDEO_OZETI.md`
 - `API_ENTEGRASYON_NOTLARI.md`
 - `BASLAT.bat`
@@ -21,6 +24,7 @@ Destek dosyalari:
 ## Moduller
 
 - Yorum Analizi
+- Video ve transkript ice aktarma
 - Prodüksiyon CRM
 - Banana Studio
 - Vibe Coding Rehberi
