@@ -320,21 +320,22 @@ function loadState(){
     const s=storageGet(STORE_KEY);
     if(!s)return buildInitial();
     const saved=JSON.parse(s);
-    const merged=deepMerge(buildInitial(),saved);
+    const explicitEmptyArrays=new Set(isObj(saved)?Object.keys(saved).filter(k=>Array.isArray(saved[k])&&!saved[k].length):[]);
+    let merged=normalizeState(deepMerge(buildInitial(),saved),explicitEmptyArrays);
     // Migrate Orkun references
     merged.settings.members=merged.settings.members.map(m=>m==="Orkun"?"Kadir":m);
     if(merged.users)merged.users=merged.users.map(u=>u.name==="Orkun"?{...u,name:"Kadir"}:u);
     merged.productions.forEach(p=>{if(p.channel==="Orkun Isitmak")p.channel="Kade Media";if(p.channel==="Orkun V2")p.channel="Kade V2"});
     merged.ideas.forEach(i=>{if(i.channel==="Orkun Isitmak")i.channel="Kade Media";if(i.channel==="Orkun V2")i.channel="Kade V2"});
     // Pages migration
-    if(!merged.pages||!merged.pages.length)merged.pages=clone(initialState.pages);
+    if(!explicitEmptyArrays.has("pages")&&(!merged.pages||!merged.pages.length))merged.pages=clone(initialState.pages);
     if(!merged.currentPageId&&merged.pages.length)merged.currentPageId=merged.pages[0].id;
     // Prompt templates migration
-    if(!merged.promptTemplates||!merged.promptTemplates.length)merged.promptTemplates=clone(defaultPromptTemplates);
+    if(!explicitEmptyArrays.has("promptTemplates")&&(!merged.promptTemplates||!merged.promptTemplates.length))merged.promptTemplates=clone(defaultPromptTemplates);
     if(typeof merged.transcriptText!=="string")merged.transcriptText="";
     if(typeof merged.transcriptName!=="string")merged.transcriptName="";
     if(merged.transcriptText&&!merged.transcriptInsights)merged.transcriptInsights=analyzeTranscriptText(merged.transcriptText);
-    return merged;
+    return normalizeState(merged,explicitEmptyArrays);
   }catch{ return buildInitial() }
 }
 
@@ -342,6 +343,192 @@ function buildInitial(){
   const s=clone(initialState);
   s.promptTemplates=clone(defaultPromptTemplates);
   return s;
+}
+
+function isObj(v){ return v&&typeof v==="object"&&!Array.isArray(v) }
+function arr(v){ return Array.isArray(v)?v:[] }
+function str(v,fallback=""){ return typeof v==="string"?v:fallback }
+function num(v,fallback=0){ const n=Number(v); return Number.isFinite(n)?n:fallback }
+function bool(v){ return Boolean(v) }
+function idOf(v,prefix){ return str(v)||uid(prefix) }
+
+function normalizeState(input,explicitEmptyArrays=new Set()){
+  const base=clone(initialState);
+  const s=isObj(input)?input:{};
+  const settings=isObj(s.settings)?s.settings:{};
+  const members=arr(settings.members).map(m=>str(m).trim()).filter(Boolean);
+  s.settings={
+    ...base.settings,
+    ...settings,
+    teamName:str(settings.teamName,base.settings.teamName),
+    monthlyBudget:num(settings.monthlyBudget,base.settings.monthlyBudget),
+    members:members.length?members:clone(base.settings.members),
+  };
+
+  s.references=arr(s.references).map((r,i)=>normalizeReference(r,base.references[i%base.references.length])).filter(Boolean);
+  if(!s.references.length&&!explicitEmptyArrays.has("references"))s.references=clone(base.references);
+
+  s.ideas=arr(s.ideas).map(normalizeIdea).filter(Boolean);
+  if(!s.ideas.length&&!explicitEmptyArrays.has("ideas"))s.ideas=clone(base.ideas);
+
+  s.productions=arr(s.productions).map(p=>normalizeProduction(p,s.settings.members)).filter(Boolean);
+  if(!s.productions.length&&!explicitEmptyArrays.has("productions"))s.productions=clone(base.productions);
+
+  s.inventory=arr(s.inventory).map(normalizeInventoryItem).filter(Boolean);
+  if(!s.inventory.length&&!explicitEmptyArrays.has("inventory"))s.inventory=clone(base.inventory);
+
+  s.docs=arr(s.docs).map(normalizeDoc).filter(Boolean);
+  if(!s.docs.length&&!explicitEmptyArrays.has("docs"))s.docs=clone(base.docs);
+
+  s.users=arr(s.users).map(normalizeUser).filter(Boolean);
+  if(!s.users.length)s.users=clone(base.users);
+
+  s.media=arr(s.media).map(normalizeMedia).filter(Boolean);
+  s.videos=arr(s.videos).map(normalizeVideo).filter(Boolean);
+  s.brainstorm=arr(s.brainstorm).map(normalizeBrainstorm).filter(Boolean);
+  s.radarNotes=arr(s.radarNotes).map(n=>str(n)).filter(Boolean);
+  s.promptHistory=arr(s.promptHistory).map(p=>str(p)).filter(Boolean);
+  s.analysisHistory=arr(s.analysisHistory).map(normalizeAnalysis).filter(Boolean);
+  s.activityLog=arr(s.activityLog).map(normalizeLog).filter(Boolean);
+  s.selectedTasks=arr(s.selectedTasks).map(id=>str(id)).filter(Boolean);
+
+  s.totalUsdSpent=num(s.totalUsdSpent,base.totalUsdSpent);
+  s.kanbanTagFilter=str(s.kanbanTagFilter,null);
+  s.sourceVideo=isObj(s.sourceVideo)?s.sourceVideo:null;
+  s.transcriptText=str(s.transcriptText,"");
+  s.transcriptName=str(s.transcriptName,"");
+  s.transcriptInsights=isObj(s.transcriptInsights)?s.transcriptInsights:null;
+  s.promptTemplates=arr(s.promptTemplates).map(normalizeTemplate).filter(Boolean);
+  if(!s.promptTemplates.length&&!explicitEmptyArrays.has("promptTemplates"))s.promptTemplates=clone(defaultPromptTemplates);
+
+  s.pages=arr(s.pages).map(normalizePage).filter(Boolean);
+  if(!s.pages.length&&!explicitEmptyArrays.has("pages"))s.pages=clone(base.pages);
+  const livePages=s.pages.filter(p=>!p.inTrash);
+  s.currentPageId=livePages.some(p=>p.id===s.currentPageId)?s.currentPageId:(livePages[0]?.id||s.pages[0]?.id||null);
+  s.recentPages=arr(s.recentPages).map(id=>str(id)).filter(id=>s.pages.some(p=>p.id===id)).slice(0,10);
+  return s;
+}
+
+function normalizeReference(r,fallback={}){
+  if(!isObj(r))r={};
+  const tag=str(r.tag,fallback.tag||"@ref");
+  return{id:idOf(r.id,"ref"),tag:tag.startsWith("@")?tag:`@${tag}`,label:str(r.label,fallback.label||tag.replace("@","")),tone:str(r.tone,fallback.tone||"teal")};
+}
+
+function normalizeIdea(i){
+  if(!isObj(i))return null;
+  return{id:idOf(i.id,"i"),title:str(i.title,"Başlıksız fikir"),channel:str(i.channel,"Kade Media"),notes:str(i.notes,"")};
+}
+
+function normalizeProduction(p,members=[]){
+  if(!isObj(p))return null;
+  const stageIds=stages.map(s=>s.id);
+  const owner=str(p.owner,members[0]||"Operasyon");
+  const budgets=arr(p.budgets).map(normalizeBudgetGroup).filter(Boolean);
+  return{
+    id:idOf(p.id,"p"),
+    title:str(p.title,"Başlıksız prodüksiyon"),
+    channel:str(p.channel,"Kade Media"),
+    stage:stageIds.includes(p.stage)?p.stage:"draft",
+    shootDate:str(p.shootDate,""),
+    publishDate:str(p.publishDate,""),
+    ideaId:str(p.ideaId,""),
+    owner,
+    tags:arr(p.tags).map(t=>str(t)).filter(Boolean),
+    updates:arr(p.updates).map(u=>str(u)).filter(Boolean),
+    tasks:arr(p.tasks).map(t=>normalizeTask(t,owner)).filter(Boolean),
+    budgets:budgets.length?budgets:[{category:"Hazirlik",items:[]}],
+  };
+}
+
+function normalizeTask(t,owner){
+  if(!isObj(t))return null;
+  return{id:idOf(t.id,"t"),title:str(t.title,"Başlıksız görev"),assignee:str(t.assignee,owner||"Operasyon"),priority:str(t.priority,"Orta"),due:str(t.due,""),done:bool(t.done),desc:str(t.desc,"")};
+}
+
+function normalizeBudgetGroup(g){
+  if(!isObj(g))return null;
+  return{category:str(g.category,"Hazirlik"),items:arr(g.items).map(normalizeBudgetItem).filter(Boolean)};
+}
+
+function normalizeBudgetItem(i){
+  if(!isObj(i))return null;
+  return{id:idOf(i.id,"bi"),label:str(i.label,"Kalem"),amount:num(i.amount,0),spender:str(i.spender,"Operasyon")};
+}
+
+function normalizeInventoryItem(i){
+  if(!isObj(i))return null;
+  return{id:idOf(i.id,"inv"),name:str(i.name,"Ürün"),qty:num(i.qty,0),location:str(i.location,"")};
+}
+
+function normalizeDoc(d){
+  if(!isObj(d))return null;
+  return{id:d.id?str(d.id):undefined,title:str(d.title,"Döküman"),type:str(d.type,"Genel"),owner:str(d.owner,"Operasyon"),icon:str(d.icon,"📄")};
+}
+
+function normalizeUser(u){
+  if(!isObj(u))return null;
+  return{name:str(u.name,"Kullanıcı"),images:num(u.images,0),videos:num(u.videos,0),spend:num(u.spend,0)};
+}
+
+function normalizeMedia(m){
+  if(!isObj(m))return null;
+  return{id:idOf(m.id,"img"),title:str(m.title,"Görsel"),prompt:str(m.prompt,""),model:str(m.model,""),cost:num(m.cost,0),src:str(m.src,"")};
+}
+
+function normalizeVideo(v){
+  if(!isObj(v))return null;
+  return{id:idOf(v.id,"vid"),title:str(v.title,"Video"),prompt:str(v.prompt,""),model:str(v.model,""),cost:num(v.cost,0),dur:num(v.dur,0)};
+}
+
+function normalizeBrainstorm(b){
+  if(!isObj(b))return null;
+  return{id:idOf(b.id,"bs"),prompt:str(b.prompt,""),idx:num(b.idx,0)};
+}
+
+function normalizeTemplate(t){
+  if(!isObj(t))return null;
+  return{id:idOf(t.id,"tpl"),name:str(t.name,"Şablon"),prompt:str(t.prompt,"")};
+}
+
+function normalizeAnalysis(a){
+  if(!isObj(a))return null;
+  return{id:idOf(a.id,"as"),videoUrl:str(a.videoUrl,""),rawComments:str(a.rawComments,""),ts:num(a.ts,Date.now()),total:num(a.total,0),score:num(a.score,0),themes:arr(a.themes)};
+}
+
+function normalizeLog(l){
+  if(!isObj(l))return null;
+  return{id:idOf(l.id,"log"),message:str(l.message,""),type:str(l.type,"info"),ts:num(l.ts,Date.now())};
+}
+
+function normalizePage(p){
+  if(!isObj(p))return null;
+  const blocks=arr(p.blocks).map(normalizeBlock).filter(Boolean);
+  return{
+    id:idOf(p.id,"pg"),
+    title:str(p.title,"Başlıksız"),
+    icon:str(p.icon,"📄"),
+    cover:p.cover?str(p.cover):null,
+    parentId:p.parentId?str(p.parentId):null,
+    isFavorite:bool(p.isFavorite),
+    inTrash:bool(p.inTrash),
+    createdAt:num(p.createdAt,Date.now()),
+    updatedAt:num(p.updatedAt,Date.now()),
+    blocks:blocks.length?blocks:[{id:uid("b"),type:"paragraph",content:""}],
+  };
+}
+
+function normalizeBlock(b){
+  if(!isObj(b))return null;
+  const type=str(b.type,"paragraph");
+  const out={...b,id:idOf(b.id,"b"),type,content:str(b.content,"")};
+  if(type==="todo")out.done=bool(b.done);
+  if(type==="callout")out.emoji=str(b.emoji,"💡");
+  if(type==="code")out.lang=str(b.lang,"javascript");
+  if(type==="table")out.rows=arr(b.rows).map(row=>arr(row).map(cell=>str(cell)));
+  if(type==="columns")out.cols=arr(b.cols).map(c=>({content:isObj(c)?str(c.content,""):str(c,"")}));
+  if(type==="toggle")out.childBlocks=arr(b.childBlocks).map(normalizeBlock).filter(Boolean);
+  return out;
 }
 
 function saveState(){
@@ -390,9 +577,9 @@ document.addEventListener("DOMContentLoaded",()=>{
 
 // ── YARDIMCILAR ───────────────────────────────────────────────────────
 function esc(s){ return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;") }
-function totalSpent(prods){ return(prods||state.productions).reduce((t,p)=>t+productionSpent(p),0) }
-function productionSpent(p){ return p.budgets.reduce((s,g)=>s+g.items.reduce((a,i)=>a+Number(i.amount||0),0),0) }
-function openTasks(){ return state.productions.flatMap(p=>p.tasks.filter(t=>!t.done).map(t=>({task:t,production:p}))) }
+function totalSpent(prods){ return arr(prods||state.productions).reduce((t,p)=>t+productionSpent(p),0) }
+function productionSpent(p){ return arr(p?.budgets).reduce((s,g)=>s+arr(g?.items).reduce((a,i)=>a+Number(i.amount||0),0),0) }
+function openTasks(){ return arr(state.productions).flatMap(p=>arr(p.tasks).filter(t=>!t.done).map(t=>({task:t,production:p}))) }
 function upcomingTasksList(){ return openTasks().sort((a,b)=>String(a.task.due).localeCompare(String(b.task.due))).slice(0,6) }
 function priorityColor(p){ return{"Yüksek":"coral","Orta":"gold","Düsük":"teal","Yüksek":"coral","Düşük":"teal"}[p]||"indigo" }
 function containsAny(text,list){ const l=text.toLocaleLowerCase("tr-TR"); return list.some(w=>l.includes(w)) }
@@ -2133,4 +2320,3 @@ function makeThumb(text,seed){
   const svg=`<svg xmlns='http://www.w3.org/2000/svg' width='320' height='180'><rect width='320' height='180' fill='${bg}'/><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='${fg}' stop-opacity='.4'/><stop offset='100%' stop-color='transparent'/></linearGradient></defs><rect width='320' height='180' fill='url(#g)'/><text x='50%' y='46%' dominant-baseline='middle' text-anchor='middle' font-family='Inter,sans-serif' font-size='20' font-weight='800' fill='${fg}'>${words}</text><text x='50%' y='68%' dominant-baseline='middle' text-anchor='middle' font-family='Inter,sans-serif' font-size='11' fill='${fg}' opacity='.55'>Banana Studio</text></svg>`;
   return`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
-
