@@ -8,6 +8,36 @@ const { exec } = require("child_process");
 const root = __dirname;
 const preferredPort = Number(process.env.PORT || 4173);
 
+// ── KONFIG / API ANAHTARLARI ──────────────────────────────────────────
+// Anahtarlar kade.config.json icinde tutulur (gitignore'lu, tarayiciya sizmaz).
+// Ornek icin kade.config.example.json dosyasina bak.
+function loadConfig() {
+  let cfg = {};
+  try {
+    const raw = fs.readFileSync(path.join(root, "kade.config.json"), "utf8");
+    cfg = JSON.parse(raw);
+  } catch { /* dosya yoksa demo modunda calisir */ }
+  // Ortam degiskenleri dosyanin uzerine yazar
+  cfg.provider = process.env.AI_PROVIDER || cfg.provider || "gemini";
+  cfg.geminiKey = process.env.GEMINI_API_KEY || cfg.geminiKey || "";
+  cfg.openaiKey = process.env.OPENAI_API_KEY || cfg.openaiKey || "";
+  cfg.youtubeKey = process.env.YOUTUBE_API_KEY || cfg.youtubeKey || "";
+  cfg.assistantModel = cfg.assistantModel || "gemini-2.0-flash";
+  cfg.imageModel = cfg.imageModel || "imagen-3.0-generate-002";
+  return cfg;
+}
+let config = loadConfig();
+
+function features() {
+  const hasAi = Boolean(config.geminiKey || config.openaiKey);
+  return {
+    provider: config.provider,
+    assistant: hasAi,
+    image: hasAi,
+    youtube: Boolean(config.youtubeKey),
+  };
+}
+
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -25,6 +55,8 @@ const mime = {
 
 function resolveFile(urlPath) {
   const clean = decodeURIComponent(urlPath.split("?")[0]).replace(/^\/+/, "");
+  // Gizli config dosyasi servis edilmez
+  if (clean === "kade.config.json") return null;
   const target = path.resolve(root, clean || "index.html");
   const rel = path.relative(root, target);
   if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
@@ -40,8 +72,178 @@ function openBrowser(url) {
   exec(cmd, () => {});
 }
 
+// ── Yardimcilar ───────────────────────────────────────────────────────
+function sendJson(res, code, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(body);
+}
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (c) => { data += c; if (data.length > 5e6) req.destroy(); });
+    req.on("end", () => {
+      try { resolve(data ? JSON.parse(data) : {}); }
+      catch { resolve({}); }
+    });
+  });
+}
+
+function parseVideoId(url) {
+  if (!url) return null;
+  const s = String(url).trim();
+  const patterns = [
+    /[?&]v=([A-Za-z0-9_-]{11})/,
+    /youtu\.be\/([A-Za-z0-9_-]{11})/,
+    /youtube\.com\/(?:embed|shorts|live)\/([A-Za-z0-9_-]{11})/,
+  ];
+  for (const p of patterns) { const m = s.match(p); if (m) return m[1]; }
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+  return null;
+}
+
+// ── API: ASISTAN (Gemini / OpenAI) ────────────────────────────────────
+async function handleAssistant(body) {
+  const question = String(body.question || "").slice(0, 4000);
+  const context = String(body.context || "").slice(0, 12000);
+  if (!question) return { error: "Soru bos." };
+  const sys = "Sen bir YouTube produksiyon ekibinin Turkce konusan yapim asistanisin. " +
+    "Asagidaki ekip verisine dayanarak kisa, net ve uygulanabilir cevap ver. " +
+    "Veri yoksa genel oneride bulun.\n\n--- EKIP VERISI ---\n" + context;
+
+  if (config.provider === "openai") {
+    if (!config.openaiKey) return { error: "OpenAI anahtari yok." };
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${config.openaiKey}` },
+      body: JSON.stringify({
+        model: config.assistantModel.startsWith("gpt") ? config.assistantModel : "gpt-4o-mini",
+        messages: [{ role: "system", content: sys }, { role: "user", content: question }],
+        temperature: 0.4,
+      }),
+    });
+    const j = await r.json();
+    if (!r.ok) return { error: j.error?.message || "OpenAI hatasi" };
+    return { answer: j.choices?.[0]?.message?.content?.trim() || "(bos cevap)" };
+  }
+
+  // Varsayilan: Gemini
+  if (!config.geminiKey) return { error: "Gemini anahtari yok." };
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.assistantModel}:generateContent?key=${config.geminiKey}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: sys }] },
+      contents: [{ role: "user", parts: [{ text: question }] }],
+      generationConfig: { temperature: 0.4 },
+    }),
+  });
+  const j = await r.json();
+  if (!r.ok) return { error: j.error?.message || "Gemini hatasi" };
+  const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "(bos cevap)";
+  return { answer: text.trim() };
+}
+
+// ── API: YOUTUBE YORUMLARI ────────────────────────────────────────────
+async function handleYoutubeComments(query) {
+  if (!config.youtubeKey) return { error: "YouTube anahtari yok." };
+  const videoId = parseVideoId(query.videoUrl || query.videoId);
+  if (!videoId) return { error: "Gecerli bir YouTube linki/ID bulunamadi." };
+  const max = Math.min(Number(query.max) || 100, 300);
+  const out = [];
+  let pageToken = "";
+  try {
+    while (out.length < max) {
+      const url = new URL("https://www.googleapis.com/youtube/v3/commentThreads");
+      url.searchParams.set("part", "snippet");
+      url.searchParams.set("videoId", videoId);
+      url.searchParams.set("maxResults", "100");
+      url.searchParams.set("order", "relevance");
+      url.searchParams.set("key", config.youtubeKey);
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+      const r = await fetch(url);
+      const j = await r.json();
+      if (!r.ok) return { error: j.error?.message || "YouTube hatasi" };
+      for (const it of j.items || []) {
+        const sn = it.snippet?.topLevelComment?.snippet;
+        if (sn) out.push({ text: sn.textOriginal || "", likes: sn.likeCount || 0, author: sn.authorDisplayName || "" });
+      }
+      pageToken = j.nextPageToken || "";
+      if (!pageToken) break;
+    }
+  } catch (e) {
+    return { error: "YouTube istegi basarisiz: " + e.message };
+  }
+  return { videoId, comments: out.slice(0, max) };
+}
+
+// ── API: GORSEL URETIMI ───────────────────────────────────────────────
+async function handleImage(body) {
+  const prompt = String(body.prompt || "").slice(0, 4000);
+  if (!prompt) return { error: "Prompt bos." };
+
+  if (config.provider === "openai") {
+    if (!config.openaiKey) return { error: "OpenAI anahtari yok." };
+    const r = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${config.openaiKey}` },
+      body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024" }),
+    });
+    const j = await r.json();
+    if (!r.ok) return { error: j.error?.message || "OpenAI gorsel hatasi" };
+    const b64 = j.data?.[0]?.b64_json;
+    if (!b64) return { error: "Gorsel donmedi." };
+    return { image: `data:image/png;base64,${b64}` };
+  }
+
+  // Varsayilan: Gemini / Imagen
+  if (!config.geminiKey) return { error: "Gemini anahtari yok." };
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.imageModel}:predict?key=${config.geminiKey}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } }),
+  });
+  const j = await r.json();
+  if (!r.ok) return { error: j.error?.message || "Imagen hatasi (Imagen icin faturalandirma gerekebilir)" };
+  const b64 = j.predictions?.[0]?.bytesBase64Encoded;
+  if (!b64) return { error: "Gorsel donmedi." };
+  return { image: `data:image/png;base64,${b64}` };
+}
+
+async function handleApi(req, res, url) {
+  try {
+    if (url.pathname === "/api/config" && req.method === "GET") {
+      return sendJson(res, 200, features());
+    }
+    if (url.pathname === "/api/assistant" && req.method === "POST") {
+      const body = await readBody(req);
+      return sendJson(res, 200, await handleAssistant(body));
+    }
+    if (url.pathname === "/api/youtube/comments" && req.method === "GET") {
+      return sendJson(res, 200, await handleYoutubeComments(Object.fromEntries(url.searchParams)));
+    }
+    if (url.pathname === "/api/image" && req.method === "POST") {
+      const body = await readBody(req);
+      return sendJson(res, 200, await handleImage(body));
+    }
+    return sendJson(res, 404, { error: "Bilinmeyen API ucu" });
+  } catch (e) {
+    return sendJson(res, 500, { error: "Sunucu hatasi: " + e.message });
+  }
+}
+
 function start(port) {
   const server = http.createServer((req, res) => {
+    const url = new URL(req.url || "/", `http://127.0.0.1:${port}`);
+
+    if (url.pathname.startsWith("/api/")) {
+      handleApi(req, res, url);
+      return;
+    }
+
     const file = resolveFile(req.url || "/");
     if (!file) {
       res.writeHead(403);
@@ -66,7 +268,10 @@ function start(port) {
 
   server.listen(port, "127.0.0.1", () => {
     const url = `http://127.0.0.1:${port}/`;
+    const f = features();
     console.log(`Kade Organizasyon Kiti calisiyor: ${url}`);
+    console.log(`API durumu -> Asistan: ${f.assistant ? "acik" : "kapali"} | YouTube: ${f.youtube ? "acik" : "kapali"} | Gorsel: ${f.image ? "acik" : "kapali"} (saglayici: ${f.provider})`);
+    if (!f.assistant && !f.youtube) console.log("Not: kade.config.json bos. Demo modunda calisiyor. Anahtar eklemek icin kade.config.example.json dosyasina bak.");
     console.log("Kapatmak icin bu pencereyi kapatabilir veya Ctrl+C yapabilirsin.");
     if (!process.env.NO_OPEN) openBrowser(url);
   });

@@ -548,9 +548,56 @@ function logActivity(message,type="info"){
   state.activityLog=[{id:uid("log"),message,type,ts:Date.now()},...state.activityLog].slice(0,MAX_LOG);
 }
 
+// ── API ISTEMCISI (server.js proxy) ──────────────────────────────────
+// Anahtar varsa gercek API, yoksa yereldeki demo akisi calisir.
+const API={ features:{provider:"gemini",assistant:false,youtube:false,image:false} };
+async function loadApiFeatures(){
+  try{
+    const r=await fetch("/api/config");
+    if(r.ok) API.features=await r.json();
+  }catch{ /* dosya:// veya sunucusuz acildiysa demo modu */ }
+  applyApiFeatures();
+  return API.features;
+}
+async function apiPost(path,body){
+  const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+  return r.json();
+}
+async function apiGet(path){ const r=await fetch(path); return r.json(); }
+function applyApiFeatures(){
+  // Asistan placeholder / ipucu
+  const ai=document.getElementById("assistantInput");
+  if(ai) ai.placeholder=API.features.assistant?"Ekibine, butceye, gorevlere dair sor…":"(Demo) Soru sor…";
+  // YouTube yorum cekme butonu
+  const btn=document.getElementById("fetchCommentsBtn");
+  if(btn) btn.style.display=API.features.youtube?"":"none";
+  const badge=document.getElementById("youtubeApiBadge");
+  if(badge) badge.textContent=API.features.youtube?"YouTube API bagli":"Demo mod (anahtar yok)";
+}
+
+// Modele gonderilecek kompakt ekip ozeti
+function buildAssistantContext(){
+  try{
+    const spent=totalSpent();
+    const prods=arr(state.productions).map(p=>`- ${p.title} | asama:${p.stage||"?"} | harcama:${fmt.try.format(productionSpent(p))} | gorev:${arr(p.tasks).length}`).slice(0,20).join("\n");
+    const tasks=(typeof upcomingTasksList==="function"?upcomingTasksList():[]).slice(0,10).map(t=>`- ${t.task?.title} (${t.task?.assignee||"?"}, teslim:${t.task?.due||"-"})`).join("\n");
+    const inv=arr(state.inventory).slice(0,15).map(i=>`- ${i.name}: ${i.qty} adet`).join("\n");
+    const ideas=arr(state.ideas).slice(0,10).map(i=>`- ${i.title}`).join("\n");
+    return [
+      `Aylik butce: ${fmt.try.format(state.settings?.monthlyBudget||0)} | Bu ay harcanan: ${fmt.try.format(spent)}`,
+      `Ekip: ${arr(state.settings?.members).join(", ")}`,
+      `\nPRODUKSIYONLAR:\n${prods||"yok"}`,
+      `\nYAKLASAN GOREVLER:\n${tasks||"yok"}`,
+      `\nENVANTER:\n${inv||"yok"}`,
+      `\nFIKIRLER:\n${ideas||"yok"}`,
+    ].join("\n");
+  }catch{ return "(veri ozeti olusturulamadi)"; }
+}
+
 // ── BOOTSTRAP ────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded",()=>{
   state=loadState();
+  loadApiFeatures();
   loadTheme();
   populateSelects();
   bindNavigation();
@@ -829,7 +876,23 @@ function renderTeamWorkload(){
 }
 
 // ── AI ASISTAN ────────────────────────────────────────────────────────
-function answerAssistant(question){
+async function answerAssistant(question){
+  const out=document.getElementById("assistantAnswer");
+  const q=(question||"").trim();
+  if(!q){ if(out)out.textContent="Bir soru yaz."; return; }
+  if(API.features.assistant){
+    if(out)out.textContent="Düşünüyor…";
+    try{
+      const res=await apiPost("/api/assistant",{question:q,context:buildAssistantContext()});
+      if(res.error){ if(out)out.textContent="Hata: "+res.error+" (demo cevabına dönülüyor)"; answerAssistantLocal(question); return; }
+      if(out)out.textContent=res.answer||"(boş cevap)";
+      if(typeof logActivity==="function")logActivity("AI asistana soruldu","info");
+      return;
+    }catch(e){ if(out)out.textContent="Bağlantı hatası, demo cevap: "; answerAssistantLocal(question); return; }
+  }
+  answerAssistantLocal(question);
+}
+function answerAssistantLocal(question){
   const q=(question||"").toLocaleLowerCase("tr-TR"),spent=totalSpent();
   let ans=`Bu ay toplam ${fmt.try.format(spent)} harcandi (aylik bütcenin %${Math.round((spent/state.settings.monthlyBudget)*100)}'i).`;
   if(q.includes("kameraman")||q.includes("kase")||q.includes("ücret"))ans="Kameraman kase ücreti 8.500 TL - 12.000 TL araligindadir. Kütüphane > Kase Tablosu'na bak.";
@@ -1039,6 +1102,26 @@ function bindCommentSection(){
   document.getElementById("commentForm").addEventListener("submit",e=>{ e.preventDefault(); runCommentAnalysis() });
   document.getElementById("exportCsv").addEventListener("click",exportCommentsCsv);
   document.getElementById("saveAnalysis").addEventListener("click",saveAnalysisSession);
+  document.getElementById("fetchCommentsBtn")?.addEventListener("click",fetchYoutubeComments);
+}
+async function fetchYoutubeComments(){
+  const btn=document.getElementById("fetchCommentsBtn");
+  const url=document.getElementById("videoUrl")?.value||"";
+  if(!url.trim()){ showToast("Önce video linki gir","error"); return; }
+  const old=btn?btn.innerHTML:"";
+  if(btn){ btn.disabled=true; btn.textContent="Çekiliyor…"; }
+  try{
+    const res=await apiGet("/api/youtube/comments?videoUrl="+encodeURIComponent(url)+"&max=200");
+    if(res.error){ showToast("YouTube: "+res.error,"error"); return; }
+    const lines=arr(res.comments).map(c=>`[${c.likes||0}] ${String(c.text||"").replace(/\s+/g," ").trim()}`);
+    if(!lines.length){ showToast("Bu videoda yorum bulunamadı (kapalı olabilir)","warning"); return; }
+    const el=document.getElementById("commentsInput");
+    if(el)el.value=lines.join("\n");
+    runCommentAnalysis();
+    showToast(`${lines.length} yorum çekildi ve analiz edildi`,"success");
+    if(typeof logActivity==="function")logActivity(`YouTube: ${lines.length} yorum çekildi`,"success");
+  }catch(e){ showToast("Bağlantı hatası: "+e.message,"error"); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=old; refreshIcons&&refreshIcons(); } }
 }
 function setSampleComments(){ const el=document.getElementById("commentsInput"); if(el)el.value=sampleComments.map(c=>`[${c.likes}] ${c.text}`).join("\n") }
 function runCommentAnalysis(){ const raw=document.getElementById("commentsInput").value; const result=analyzeComments(raw); renderCommentResult(result); renderVideoScore(result); renderAnalysisHistory(); refreshIcons() }
@@ -1317,7 +1400,7 @@ function bindBanana(){
   document.getElementById("enhanceImagePrompt").addEventListener("click",()=>{ const el=document.getElementById("imagePrompt");el.value=enhanceImagePrompt(el.value);showToast("Prompt iyilestirildi","info") });
   document.getElementById("enhanceVideoPrompt").addEventListener("click",()=>{ const el=document.getElementById("videoPrompt");el.value=enhanceVideoPrompt(el.value);showToast("Prompt iyilestirildi","info") });
   document.getElementById("saveTemplate").addEventListener("click",()=>{ const prompt=document.getElementById("imagePrompt").value.trim();if(!prompt){showToast("Önce bir prompt yaz","error");return}snapshotUndo();const name=prompt.slice(0,30)+(prompt.length>30?"…":"");if(!state.promptTemplates)state.promptTemplates=[];state.promptTemplates.push({id:uid("tpl"),name,prompt});saveState();renderPromptTemplates();showToast("Sablon kaydedildi","success") });
-  document.getElementById("imageForm").addEventListener("submit",e=>{ e.preventDefault();const model=imageModels.find(m=>m.id===document.getElementById("imageModel").value)||imageModels[0],count=Number(document.getElementById("imageCount").value||1),prompt=document.getElementById("imagePrompt").value,cost=model.cost*count;snapshotUndo();for(let i=0;i<count;i++)state.media.push({id:uid("img"),title:`Görsel ${state.media.length+1}`,prompt,model:model.name,cost:model.cost,src:makeThumb(prompt,state.media.length+i)});state.media=state.media.slice(-24);state.users[0].images+=count;state.users[0].spend+=cost;state.totalUsdSpent=(state.totalUsdSpent||0)+cost;if(!state.promptHistory)state.promptHistory=[];state.promptHistory=[prompt,...state.promptHistory.filter(p=>p!==prompt)].slice(0,8);saveState();renderBanana();renderRecentMedia();showToast(`${count} görsel üretildi (${fmt.usd.format(cost)})`,"success");logActivity(`Banana: ${count} görsel üretildi`,"success") });
+  document.getElementById("imageForm").addEventListener("submit",async e=>{ e.preventDefault();const model=imageModels.find(m=>m.id===document.getElementById("imageModel").value)||imageModels[0],count=Number(document.getElementById("imageCount").value||1),prompt=document.getElementById("imagePrompt").value,cost=model.cost*count;if(!prompt.trim()){showToast("Önce prompt yaz","error");return}snapshotUndo();const srcs=await generateImageSrcs(prompt,count,state.media.length);for(let i=0;i<count;i++)state.media.push({id:uid("img"),title:`Görsel ${state.media.length+1}`,prompt,model:API.features.image?model.name:model.name+" (demo)",cost:model.cost,src:srcs[i]});state.media=state.media.slice(-24);state.users[0].images+=count;state.users[0].spend+=cost;state.totalUsdSpent=(state.totalUsdSpent||0)+cost;if(!state.promptHistory)state.promptHistory=[];state.promptHistory=[prompt,...state.promptHistory.filter(p=>p!==prompt)].slice(0,8);saveState();renderBanana();renderRecentMedia();showToast(`${count} görsel ${API.features.image?"üretildi":"(demo) üretildi"} (${fmt.usd.format(cost)})`,"success");logActivity(`Banana: ${count} görsel üretildi`,"success") });
   document.getElementById("videoForm").addEventListener("submit",e=>{ e.preventDefault();const model=videoModels.find(m=>m.id===document.getElementById("videoModel").value)||videoModels[0],dur=Number(document.getElementById("videoDuration").value||10),cost=model.base*(dur/10);snapshotUndo();state.videos.push({id:uid("vid"),title:`Video ${state.videos.length+1}`,prompt:document.getElementById("videoPrompt").value,model:model.name,cost,dur});state.videos=state.videos.slice(-12);state.users[0].videos++;state.totalUsdSpent=(state.totalUsdSpent||0)+cost;saveState();renderBanana();showToast(`Video üretildi (${fmt.usd.format(cost)})`,"success") });
   document.getElementById("continueVideo").addEventListener("click",()=>{ const el=document.getElementById("videoPrompt");el.value=`[DEVAM] ${el.value}`;el.focus() });
   document.getElementById("referenceForm").addEventListener("submit",e=>{ e.preventDefault();const tag=document.getElementById("referenceTag").value.trim();if(!tag)return;state.references.push({id:uid("ref"),tag:tag.startsWith("@")?tag:`@${tag}`,label:tag.replace("@",""),tone:"teal"});document.getElementById("referenceTag").value="";saveState();renderBanana();refreshIcons() });
@@ -2311,6 +2394,23 @@ function bindPages(){
     if(e.key==="f"&&(e.ctrlKey||e.metaKey)){e.preventDefault();togglePageSearch()}
     if(e.key==="Escape"){ hideSlashMenu(); hideInlineToolbar(); document.getElementById("mentionPicker")?.remove(); document.getElementById("pageSearchBar")?.remove(); document.querySelectorAll(".nt-block-wrap").forEach(w=>{w.style.opacity="";w.style.outline="";w.style.background=""}) }
   });
+}
+
+// ── GORSEL URETIMI ───────────────────────────────────────────────────
+// Anahtar varsa /api/image (gercek model), yoksa makeThumb (demo SVG).
+async function generateImageSrcs(prompt,count,startSeed){
+  if(!API.features.image){
+    return Array.from({length:count},(_,i)=>makeThumb(prompt,startSeed+i));
+  }
+  const out=[];
+  for(let i=0;i<count;i++){
+    try{
+      const res=await apiPost("/api/image",{prompt});
+      if(res.error){ showToast("Görsel: "+res.error,"error"); out.push(makeThumb(prompt,startSeed+i)); }
+      else out.push(res.image||makeThumb(prompt,startSeed+i));
+    }catch(e){ showToast("Görsel bağlantı hatası","error"); out.push(makeThumb(prompt,startSeed+i)); }
+  }
+  return out;
 }
 
 // ── THUMBNAIL ────────────────────────────────────────────────────────

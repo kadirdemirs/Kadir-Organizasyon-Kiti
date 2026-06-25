@@ -1,67 +1,52 @@
 # API Entegrasyon Notlari
 
-Bu prototip su an tamamen yerelde calisir. Gercek servisleri baglamak icin asagidaki parcalar eklenebilir.
+Gercek servisler ARTIK BAGLI. Anahtar eklersen calisir, eklemezsen demo modunda
+calismaya devam eder (hicbir sey bozulmaz). Anahtarlar sadece `server.js` uzerinden
+kullanilir, tarayiciya sizmaz.
 
-## YouTube Yorum Analizi
+## Kurulum (3 adim)
 
-Gerekli:
+1. `kade.config.example.json` dosyasini kopyalayip adini `kade.config.json` yap.
+2. Icine anahtarlarini yapistir (asagida nereden alinacagi yaziyor).
+3. `BASLAT.bat` ile uygulamayi tekrar baslat. Acilis ekraninda hangi API'lerin
+   "acik" oldugunu gorursun.
 
-- YouTube Data API key
-- Video ID ayrıştırma
-- `commentThreads.list` ile yorum cekme
+`kade.config.json` gitignore'ludur, kimseyle paylasilmaz / commit'lenmez.
 
-Baglanacak yer:
+## Anahtarlar nereden alinir
 
-- `app.js` icinde `runCommentAnalysis()`
-- `commentsInput` alanina elle yorum koymak yerine API'den gelen yorumlar `analyzeComments()` fonksiyonuna verilir.
+- **Gemini (asistan + gorsel):** https://aistudio.google.com/apikey
+  Tek tikla, bedava katmani var. `geminiKey` alanina yapistir.
+- **YouTube (yorum cekme):** https://console.cloud.google.com
+  -> "YouTube Data API v3" etkinlestir -> Credentials -> API Key. Ucretsiz kota.
+  `youtubeKey` alanina yapistir.
+- **OpenAI (alternatif):** https://platform.openai.com/api-keys
+  Sadece `provider: "openai"` kullanacaksan gerekir (kredi karti ister).
 
-## Gemini / OpenAI Asistan
+## Hangi modul nereye bagli
 
-Gerekli:
+| Modul | Sunucu ucu | Saglayici |
+|---|---|---|
+| AI Asistan | `POST /api/assistant` | Gemini (varsayilan) / OpenAI |
+| YouTube Yorum Analizi | `GET /api/youtube/comments` | YouTube Data API v3 |
+| Gorsel Uretimi (Banana) | `POST /api/image` | Gemini Imagen / OpenAI gpt-image-1 |
 
-- Model API key
-- Guvenli backend endpoint
+- Asistan: ekip verisi (butce, produksiyon, gorev, envanter, fikir) modele context
+  olarak gonderilir; cevap `assistantAnswer` alaninda gosterilir.
+- Yorumlar: video linki verince "YouTube'dan yorumlari cek" butonu yorumlari ceker,
+  `commentsInput` alanini doldurur ve mevcut analiz motoruna verir.
+- Gorsel: `imageForm` gonderiminde gercek model cagrilir; donus base64 gorsel
+  galeriye eklenir. Anahtar yoksa demo SVG (`makeThumb`) uretilir.
 
-Baglanacak yer:
+## Notlar
 
-- `answerAssistant(question)`
-- Su an yerel kurallarla cevap veriyor. Gercek model icin soru, prodüksiyonlar, butce ve gorev datasi modele context olarak gonderilir.
+- Gemini Imagen gorsel uretimi icin Google tarafinda faturalandirma gerekebilir;
+  asistan ve YouTube yorumlari bedava katmanda calisir.
+- Video uretimi henuz baglanmadi (pahali + bekleme listeli API'ler). `videoForm`
+  hala demo uretir; ileride `POST /api/video` eklenebilir.
 
-## Gorsel Uretimi
+## Veritabani (gelecek)
 
-Gerekli:
-
-- Secilen gorsel modelinin API keyi
-- Referans gorselleri icin dosya yukleme
-- Uretim sonucunda image URL veya base64 donusu
-
-Baglanacak yer:
-
-- `imageForm` submit handler
-- Su an `makeThumb()` demo gorsel uretir. Gercek entegrasyonda bu fonksiyon yerine API sonucu galeriye eklenir.
-
-## Video Uretimi
-
-Gerekli:
-
-- Video model API keyi
-- Job baslatma ve job durumunu periyodik kontrol etme
-- Video dosya URL'sini gecmise kaydetme
-
-Baglanacak yer:
-
-- `videoForm` submit handler
-- `continueVideo` ve `enhanceVideoPrompt` akisi korunabilir.
-
-## Veritabani
-
-Basit secenekler:
-
-- Supabase: ekip, prodüksiyon, gorev, harcama ve envanter tabloları
-- Firebase: hizli auth + dokuman tabanli veri
-
-Su an:
-
-- Veriler `localStorage` icinde tutulur.
-- Kalici ekip kullanimi icin `saveState()` ve `loadState()` backend'e baglanir.
-
+Su an veriler tarayicinin `localStorage` alaninda tutulur. Kalici / cok cihazli
+kullanim icin `saveState()` ve `loadState()` bir backend'e (Supabase / Firebase)
+baglanabilir.

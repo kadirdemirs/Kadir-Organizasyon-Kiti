@@ -1,0 +1,20 @@
+{
+  "_aciklama": "Bu dosyayi 'kade.config.json' adiyla kopyala ve anahtarlarini yapistir. kade.config.json gitignore'ludur, kimseyle paylasilmaz.",
+
+  "provider": "gemini",
+
+  "geminiKey": "",
+  "youtubeKey": "",
+
+  "openaiKey": "",
+
+  "assistantModel": "gemini-2.0-flash",
+  "imageModel": "imagen-3.0-generate-002",
+
+  "_nereden_alinir": {
+    "geminiKey": "https://aistudio.google.com/apikey  (tek tik, bedava katman var)",
+    "youtubeKey": "https://console.cloud.google.com -> YouTube Data API v3 -> Credentials -> API Key (ucretsiz kota)",
+    "openaiKey": "https://platform.openai.com/api-keys  (kredi karti gerekir; sadece provider='openai' ise)",
+    "not": "provider 'gemini' ise geminiKey + youtubeKey yeterli. provider 'openai' ise asistan/gorsel icin openaiKey, yorumlar icin yine youtubeKey gerekir."
+  }
+}

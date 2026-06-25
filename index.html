@@ -154,7 +154,8 @@
         <article class="panel">
           <div class="panel-head"><div><p class="eyebrow">YouTube</p><h2>Yorum seti</h2></div><div class="icon-area"><i data-lucide="youtube"></i></div></div>
           <form id="commentForm" class="form-grid">
-            <label><span class="label-text">Video linki</span><input id="videoUrl" type="url" value="https://youtu.be/demo-video" placeholder="https://youtu.be/..."/></label>
+            <label><span class="label-text">Video linki &nbsp;<small id="youtubeApiBadge" style="text-transform:none;font-weight:400;color:var(--ink3)">Demo mod</small></span><input id="videoUrl" type="url" value="https://youtu.be/demo-video" placeholder="https://youtu.be/..."/></label>
+            <button type="button" class="ghost-btn" id="fetchCommentsBtn" style="display:none;justify-self:start"><i data-lucide="download-cloud"></i>YouTube'dan yorumları çek</button>
             <label><span class="label-text">Yorumlar &nbsp;<small style="text-transform:none;font-weight:400">[beğeni] başa yaz</small></span><textarea id="commentsInput" rows="12" placeholder="[421] Bu format çok samimi olmuş…"></textarea></label>
             <div class="form-actions">
               <button type="button" class="export-btn" id="exportCsv"><i data-lucide="download"></i>CSV</button>
