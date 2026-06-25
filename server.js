@@ -22,8 +22,8 @@ function loadConfig() {
   cfg.geminiKey = process.env.GEMINI_API_KEY || cfg.geminiKey || "";
   cfg.openaiKey = process.env.OPENAI_API_KEY || cfg.openaiKey || "";
   cfg.youtubeKey = process.env.YOUTUBE_API_KEY || cfg.youtubeKey || "";
-  cfg.assistantModel = cfg.assistantModel || "gemini-2.0-flash";
-  cfg.imageModel = cfg.imageModel || "imagen-3.0-generate-002";
+  cfg.assistantModel = cfg.assistantModel || "gemini-2.5-flash";
+  cfg.imageModel = cfg.imageModel || "gemini-2.5-flash-image";
   return cfg;
 }
 let config = loadConfig();
@@ -128,22 +128,28 @@ async function handleAssistant(body) {
     return { answer: j.choices?.[0]?.message?.content?.trim() || "(bos cevap)" };
   }
 
-  // Varsayilan: Gemini
+  // Varsayilan: Gemini (gecici "high demand"/503 durumunda tekrar dener)
   if (!config.geminiKey) return { error: "Gemini anahtari yok." };
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.assistantModel}:generateContent?key=${config.geminiKey}`;
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: sys }] },
-      contents: [{ role: "user", parts: [{ text: question }] }],
-      generationConfig: { temperature: 0.4 },
-    }),
+  const payload = JSON.stringify({
+    systemInstruction: { parts: [{ text: sys }] },
+    contents: [{ role: "user", parts: [{ text: question }] }],
+    generationConfig: { temperature: 0.4 },
   });
-  const j = await r.json();
-  if (!r.ok) return { error: j.error?.message || "Gemini hatasi" };
-  const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "(bos cevap)";
-  return { answer: text.trim() };
+  let j;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload });
+    j = await r.json();
+    if (r.ok) {
+      const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "(bos cevap)";
+      return { answer: text.trim() };
+    }
+    const msg = j.error?.message || "";
+    const transient = r.status === 503 || /high demand|overloaded|UNAVAILABLE/i.test(msg);
+    if (!transient) return { error: msg || "Gemini hatasi" };
+    await new Promise((s) => setTimeout(s, 1200 * (attempt + 1)));
+  }
+  return { error: (j?.error?.message || "Gemini su an yogun") + " — lutfen tekrar dene." };
 }
 
 // ── API: YOUTUBE YORUMLARI ────────────────────────────────────────────
@@ -198,19 +204,37 @@ async function handleImage(body) {
     return { image: `data:image/png;base64,${b64}` };
   }
 
-  // Varsayilan: Gemini / Imagen
+  // Varsayilan: Gemini
   if (!config.geminiKey) return { error: "Gemini anahtari yok." };
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.imageModel}:predict?key=${config.geminiKey}`;
+  const model = config.imageModel;
+
+  // Imagen ailesi -> :predict
+  if (model.startsWith("imagen")) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${config.geminiKey}`;
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } }),
+    });
+    const j = await r.json();
+    if (!r.ok) return { error: j.error?.message || "Imagen hatasi (faturalandirma gerekebilir)" };
+    const b64 = j.predictions?.[0]?.bytesBase64Encoded;
+    if (!b64) return { error: "Gorsel donmedi." };
+    return { image: `data:image/png;base64,${b64}` };
+  }
+
+  // Gemini gorsel modeli (nano-banana) -> :generateContent + inlineData
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.geminiKey}`;
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } }),
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseModalities: ["IMAGE"] } }),
   });
   const j = await r.json();
-  if (!r.ok) return { error: j.error?.message || "Imagen hatasi (Imagen icin faturalandirma gerekebilir)" };
-  const b64 = j.predictions?.[0]?.bytesBase64Encoded;
-  if (!b64) return { error: "Gorsel donmedi." };
-  return { image: `data:image/png;base64,${b64}` };
+  if (!r.ok) return { error: j.error?.message || "Gemini gorsel hatasi (faturalandirma gerekebilir)" };
+  const inline = j.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)?.inlineData;
+  if (!inline) return { error: "Gorsel donmedi." };
+  return { image: `data:${inline.mimeType || "image/png"};base64,${inline.data}` };
 }
 
 async function handleApi(req, res, url) {
