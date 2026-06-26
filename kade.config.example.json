@@ -8,6 +8,7 @@
   "youtubeKey": "",
 
   "qwenKey": "",
+  "qwenBaseUrl": "https://openrouter.ai/api/v1",
 
   "openaiKey": "",
 
@@ -19,6 +20,7 @@
     "geminiKey": "https://aistudio.google.com/apikey  (tek tik, bedava katman var)",
     "youtubeKey": "https://console.cloud.google.com -> YouTube Data API v3 -> Credentials -> API Key (ucretsiz kota)",
     "qwenKey": "https://openrouter.ai/keys  (uye ol -> Create Key. Qwen ':free' modelleri bedava). provider'i 'qwen' yap.",
+    "qwenBaseUrl_alternatif": "OpenRouter bedava havuzu siklikla 429 (rate-limit) verir. Daha guvenilir bedava Qwen icin Alibaba DashScope: qwenBaseUrl='https://dashscope-intl.aliyuncs.com/compatible-mode/v1', qwenModel='qwen-plus' (veya qwen-turbo), qwenKey=DashScope anahtari (https://bailian.console.alibabacloud.com). Qwen yogunsa kod otomatik Gemini'ye duser.",
     "openaiKey": "https://platform.openai.com/api-keys  (kredi karti gerekir; sadece provider='openai' ise)",
     "not": "Asistan saglayicisi 'provider' ile secilir. Yorumlar her zaman youtubeKey ile calisir. Gorsel icin gemini (faturalandirma) veya openai gerekir; Qwen'in bedava gorsel ucu yoktur. Bedava Qwen modelleri zamanla degisir: https://openrouter.ai/models?max_price=0 (Qwen filtrele)."
   }

@@ -885,7 +885,7 @@ async function answerAssistant(question){
     try{
       const res=await apiPost("/api/assistant",{question:q,context:buildAssistantContext()});
       if(res.error){ if(out)out.textContent="Hata: "+res.error+" (demo cevabına dönülüyor)"; answerAssistantLocal(question); return; }
-      if(out)out.textContent=res.answer||"(boş cevap)";
+      if(out)out.textContent=(res.answer||"(boş cevap)")+(res.note?`\n\n— ${res.note}`:"");
       if(typeof logActivity==="function")logActivity("AI asistana soruldu","info");
       return;
     }catch(e){ if(out)out.textContent="Bağlantı hatası, demo cevap: "; answerAssistantLocal(question); return; }

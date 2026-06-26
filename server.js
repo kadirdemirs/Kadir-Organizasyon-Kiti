@@ -22,6 +22,7 @@ function loadConfig() {
   cfg.geminiKey = process.env.GEMINI_API_KEY || cfg.geminiKey || "";
   cfg.openaiKey = process.env.OPENAI_API_KEY || cfg.openaiKey || "";
   cfg.qwenKey = process.env.QWEN_API_KEY || process.env.OPENROUTER_API_KEY || cfg.qwenKey || "";
+  cfg.qwenBaseUrl = (process.env.QWEN_BASE_URL || cfg.qwenBaseUrl || "https://openrouter.ai/api/v1").replace(/\/$/, "");
   cfg.youtubeKey = process.env.YOUTUBE_API_KEY || cfg.youtubeKey || "";
   cfg.assistantModel = cfg.assistantModel || "gemini-2.5-flash";
   cfg.qwenModel = cfg.qwenModel || "qwen/qwen3-next-80b-a3b-instruct:free";
@@ -120,10 +121,10 @@ async function handleAssistant(body) {
     "Veri yoksa genel oneride bulun.\n\n--- EKIP VERISI ---\n" + context;
 
   if (config.provider === "qwen") {
-    if (!config.qwenKey) return { error: "Qwen (OpenRouter) anahtari yok." };
-    let j;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    if (!config.qwenKey) return { error: "Qwen anahtari yok." };
+    let j, lastMsg = "";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const r = await fetch(`${config.qwenBaseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -139,12 +140,18 @@ async function handleAssistant(body) {
       });
       j = await r.json();
       if (r.ok && j.choices?.[0]?.message?.content) return { answer: j.choices[0].message.content.trim() };
-      const msg = j.error?.message || "";
-      const transient = r.status === 429 || r.status === 503 || /rate.?limit|overloaded|temporarily/i.test(msg);
-      if (!transient && msg) return { error: msg };
-      await new Promise((s) => setTimeout(s, 1500 * (attempt + 1)));
+      lastMsg = j.error?.message || j.error?.metadata?.raw || "";
+      const code = j.error?.code || r.status;
+      const transient = code === 429 || code === 503 || /rate.?limit|overloaded|temporarily/i.test(lastMsg);
+      if (!transient && lastMsg) return { error: lastMsg };
+      await new Promise((s) => setTimeout(s, 2500 * (attempt + 1)));
     }
-    return { error: (j?.error?.message || "Qwen su an yogun") + " — tekrar dene veya bedava kota dolmus olabilir." };
+    // Bedava Qwen havuzu doluysa ve Gemini anahtari varsa otomatik Gemini'ye dus
+    if (config.geminiKey) {
+      const fb = await callGemini(sys, question);
+      if (fb.answer) return { answer: fb.answer, note: "Qwen yogun, Gemini ile cevaplandi." };
+    }
+    return { error: "Qwen bedava havuzu su an yogun (" + (lastMsg || "429") + "). Biraz sonra tekrar dene." };
   }
 
   if (config.provider === "openai") {
@@ -163,8 +170,13 @@ async function handleAssistant(body) {
     return { answer: j.choices?.[0]?.message?.content?.trim() || "(bos cevap)" };
   }
 
-  // Varsayilan: Gemini (gecici "high demand"/503 durumunda tekrar dener)
+  // Varsayilan: Gemini
   if (!config.geminiKey) return { error: "Gemini anahtari yok." };
+  return await callGemini(sys, question);
+}
+
+// Gemini cagrisi (gecici "high demand"/503 durumunda tekrar dener)
+async function callGemini(sys, question) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.assistantModel}:generateContent?key=${config.geminiKey}`;
   const payload = JSON.stringify({
     systemInstruction: { parts: [{ text: sys }] },
